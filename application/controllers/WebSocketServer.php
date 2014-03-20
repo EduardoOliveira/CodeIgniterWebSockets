@@ -1,13 +1,22 @@
 <?php
-define("LOCK_FILE","/var/www/WebSocketServer.lock");
+define("LOCK_FILE", "/var/www/WebSocketServer.lock");
 
 class WebSocketServer extends CI_Controller
 {
 
     private $clients;
 
+    public function shutdown()
+    {
+        if (file_exists(LOCK_FILE)) {
+            posix_kill((int)file_get_contents(LOCK_FILE), 9);
+            unlink(LOCK_FILE);
+        }
+    }
+
     public function run($port = 8081)
     {
+        $this->directAccess();
         $this->tryLock();
 
         $host = 'localhost'; //host
@@ -157,8 +166,13 @@ class WebSocketServer extends CI_Controller
     private function tryLock()
     {
 
-        if(file_exists(LOCK_FILE))die();
-        file_put_contents(LOCK_FILE,getmypid());
+        if (file_exists(LOCK_FILE)) die();
+        file_put_contents(LOCK_FILE, getmypid());
+    }
+
+    private function directAccess()
+    {
+        if (!$this->input->is_cli_request()) die();
     }
 
 }

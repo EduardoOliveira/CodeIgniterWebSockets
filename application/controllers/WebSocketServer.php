@@ -4,6 +4,7 @@ define("LOCK_FILE", "/var/www/WebSocketServer.lock");
 class WebSocketServer extends CI_Controller
 {
 
+    private $sockets;
     private $clients;
 
     public function shutdown()
@@ -21,7 +22,7 @@ class WebSocketServer extends CI_Controller
 
         $host = 'localhost'; //host
         $null = NULL; //null var
-
+        
 //Create TCP/IP sream socket
         $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
 //reuseable port
@@ -34,26 +35,26 @@ class WebSocketServer extends CI_Controller
         socket_listen($socket);
 
 //create & add listning socket to the list
-        $this->clients = array($socket);
+        $this->sockets = array($socket);
 
 //start endless loop, so that our script doesn't stop
         while (true) {
             //manage multipal connections
-            $changed = $this->clients;
+            $changed = $this->sockets;
             //returns the socket resources in $changed array
             socket_select($changed, $null, $null, 0, 10);
 
             //check for new socket
             if (in_array($socket, $changed)) {
                 $socket_new = socket_accept($socket); //accpet new socket
-                $this->clients[] = $socket_new; //add socket to client array
+                $this->sockets[] = $socket_new; //add socket to client array
 
                 $header = socket_read($socket_new, 1024); //read data sent by the socket
                 $this->perform_handshaking($header, $socket_new, $host, $port); //perform websocket handshake
 
                 socket_getpeername($socket_new, $ip); //get ip address of connected socket
                 $response = $this->mask(json_encode(array('type' => 'system', 'message' => $ip . ' connected'))); //prepare json data
-                $this->send_message($response); //notify all users about new connection
+                $this->send_message($response,$socket_new); //notify all users about new connection
 
                 //make room for new socket
                 $found_socket = array_search($socket, $changed);
@@ -73,20 +74,20 @@ class WebSocketServer extends CI_Controller
 
                     //prepare data to be sent to client
                     $response_text = $this->mask(json_encode(array('type' => 'usermsg', 'name' => $user_name, 'message' => $user_message, 'color' => $user_color)));
-                    $this->send_message($response_text); //send data
+                    $this->send_message($response_text,$changed_socket); //send data
                     break 2; //exist this loop
                 }
 
                 $buf = @socket_read($changed_socket, 1024, PHP_NORMAL_READ);
                 if ($buf === false) { // check disconnected client
                     // remove client for $clients array
-                    $found_socket = array_search($changed_socket, $this->clients);
+                    $found_socket = array_search($changed_socket, $this->sockets);
                     socket_getpeername($changed_socket, $ip);
-                    unset($this->clients[$found_socket]);
+                    unset($this->sockets[$found_socket]);
 
                     //notify all users about disconnected connection
                     $response = $this->mask(json_encode(array('type' => 'system', 'message' => $ip . ' disconnected')));
-                    $this->send_message($response);
+                    $this->send_message($response,$changed_socket);
                 }
             }
         }
@@ -94,10 +95,11 @@ class WebSocketServer extends CI_Controller
         socket_close($sock);
     }
 
-    private function send_message($msg)
+    private function send_message($msg,$sender = null)
     {
-        foreach ($this->clients as $changed_socket) {
-            @socket_write($changed_socket, $msg, strlen($msg));
+        foreach ($this->sockets as $changed_socket) {
+            if($changed_socket !== $sender)
+                @socket_write($changed_socket, $msg, strlen($msg));
         }
         return true;
     }
